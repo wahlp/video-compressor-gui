@@ -1,8 +1,10 @@
 use std::{
     path::PathBuf,
+    process::{Command, Stdio},
     sync::{mpsc, Arc, Mutex, atomic::{AtomicBool, Ordering}},
     thread,
 };
+use std::io::{BufRead, BufReader};
 use std::sync::mpsc::{Sender, Receiver};
 use serde::{Serialize, Deserialize};
 use confy;
@@ -53,26 +55,24 @@ impl MyApp {
         self.ffmpeg_busy.store(true, Ordering::SeqCst);
         self.tx = Some(log_tx.clone());
 
-        let target_size = self.config.target_size_mb;
+        let target_size = self.config.target_size_mb * 1000;
 
         // Spawn thread to run FFmpeg
         thread::spawn(move || {
-            use std::process::{Command, Stdio};
-            use std::io::{BufRead, BufReader};
-
             let output_path = path.with_extension("compressed.mp4");
 
             // calculate desired bitrate
-            let bitrate_kbps = (target_size * 8192) / 60;
+            let Some((video_bitrate, audio_bitrate)) = calculate_bitrate(path.to_str().unwrap(), target_size) else { todo!() };
+            println!("Target size: {}, Video bitrate: {}, Audio bitrate: {}", target_size, video_bitrate, audio_bitrate);
 
             let mut cmd = Command::new("ffmpeg")
                 .args([
                     "-i", path.to_str().unwrap(),
                     "-r", "60",
                     "-c:v", "libx264",
-                    "-b:v", &format!("{}k", bitrate_kbps),
+                    "-b:v", &format!("{}", video_bitrate),
                     "-c:a", "aac",
-                    "-b:a", "128k",                      // or adjust to match source
+                    "-b:a", &format!("{}", audio_bitrate),
                     "-y", output_path.to_str().unwrap(),
                 ])
                 .stderr(Stdio::piped())
@@ -107,6 +107,52 @@ impl MyApp {
             }
         });
     }
+}
+
+fn get_duration_and_audio_bitrate(path: &str) -> Option<(f64, u32)> {
+    let output = Command::new("ffprobe")
+        .args([
+            "-v", "error",
+            "-select_streams", "a:0",
+            "-show_entries", "format=duration:stream=bit_rate",
+            "-of", "default=noprint_wrappers=1:nokey=1",
+            path,
+        ])
+        .output()
+        .ok()?;
+
+    if !output.status.success() {
+        return None;
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let mut lines = stdout.lines();
+    
+    let bitrate = lines.next()?.trim().parse::<u32>().ok()?; // in bits/sec
+    let duration = lines.next()?.trim().parse::<f64>().ok()?;
+    
+    Some((duration, bitrate))
+}
+
+fn calculate_bitrate(video_path: &str, size_upper_bound: u32) -> Option<(u32, u32)> {
+    let (duration, mut audio_bitrate) = get_duration_and_audio_bitrate(video_path)?;
+    let gib_to_gb_conversion = 1.073741824;
+    let target_total_bitrate = (size_upper_bound * 1024 * 8) as f64 / (gib_to_gb_conversion * duration);
+
+    let min_audio_bitrate = 64000;
+    let max_audio_bitrate = 256000;
+    if 10.0 * audio_bitrate as f64 > target_total_bitrate {
+        audio_bitrate = (target_total_bitrate / 10.0) as u32;
+        if audio_bitrate < min_audio_bitrate as u32 {
+            audio_bitrate = min_audio_bitrate as u32;
+        } else if audio_bitrate > max_audio_bitrate as u32 {
+            audio_bitrate = max_audio_bitrate as u32;
+        }
+    }
+    
+    let video_bitrate = (target_total_bitrate as u32).saturating_sub(audio_bitrate);
+
+    Some((video_bitrate, audio_bitrate))
 }
 
 impl eframe::App for MyApp {
