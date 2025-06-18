@@ -30,6 +30,7 @@ pub struct MyApp {
     ffmpeg_log: Arc<Mutex<Vec<String>>>,
     ffmpeg_busy: Arc<AtomicBool>,
     tx: Option<Sender<String>>,
+    should_start_next: Arc<Mutex<bool>>,
 }
 
 impl MyApp {
@@ -41,6 +42,7 @@ impl MyApp {
             ffmpeg_log: Arc::new(Mutex::new(Vec::new())),
             ffmpeg_busy: Arc::new(AtomicBool::new(false)),
             tx: None,
+            should_start_next: Arc::new(Mutex::new(false)),
         })
     }
 
@@ -94,11 +96,15 @@ impl MyApp {
         // Clone log and busy flag for the log reading thread
         let log_arc = Arc::clone(&self.ffmpeg_log);
         let busy_flag = Arc::clone(&self.ffmpeg_busy);
+        let should_start_next_clone = Arc::clone(&self.should_start_next);
 
         thread::spawn(move || {
             while let Ok(line) = log_rx.recv() {
                 if line == "[done]" {
                     busy_flag.store(false, Ordering::SeqCst);
+                    if let Ok(mut flag) = should_start_next_clone.lock() {
+                        *flag = true;
+                    }
                 } else {
                     if let Ok(mut log) = log_arc.lock() {
                         log.push(line);
@@ -157,6 +163,26 @@ fn calculate_bitrate(video_path: &str, size_upper_bound: u32) -> Option<(u32, u3
 
 impl eframe::App for MyApp {
     fn update(&mut self, ctx: &egui::Context, _: &mut eframe::Frame) {
+        // Automatically start next compression job if flagged
+        if !self.ffmpeg_busy.load(Ordering::SeqCst) && !self.video_queue.is_empty() {
+            let should_start = {
+                if let Ok(mut flag) = self.should_start_next.lock() {
+                    if *flag {
+                        *flag = false;
+                        true
+                    } else {
+                        false
+                    }
+                } else {
+                    false
+                }
+            };
+
+            if should_start {
+                self.start_ffmpeg_thread();
+            }
+        }
+
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.heading("FFmpeg Video Compressor");
 
