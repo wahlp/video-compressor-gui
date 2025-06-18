@@ -184,8 +184,6 @@ impl eframe::App for MyApp {
         }
 
         egui::CentralPanel::default().show(ctx, |ui| {
-            ui.heading("FFmpeg Video Compressor");
-
             // Drag & drop handler
             for file in ctx.input(|i| i.raw.dropped_files.clone()) {
                 if let Some(path) = file.path {
@@ -205,7 +203,10 @@ impl eframe::App for MyApp {
                 }
             });
 
-            if ui.button("Start Compression").clicked() {
+            if ui.add_sized(
+                egui::vec2(200.0, 40.0),
+                egui::Button::new(egui::RichText::new("Start Compression").strong()).wrap(),
+            ).clicked() {
                 self.start_ffmpeg_thread();
             }
 
@@ -217,13 +218,15 @@ impl eframe::App for MyApp {
 
             ui.separator();
             ui.label("FFmpeg Output:");
-            egui::ScrollArea::vertical().show(ui, |ui| {
-                if let Ok(log) = self.ffmpeg_log.lock() {
-                    for line in log.iter() {
-                        ui.label(line);
+            egui::ScrollArea::vertical()
+                .stick_to_bottom(true)
+                .show(ui, |ui| {
+                    if let Ok(log) = self.ffmpeg_log.lock() {
+                        for line in log.iter() {
+                            ui.label(line);
+                        }
                     }
-                }
-            });
+                });
         });
 
         ctx.request_repaint(); // keep UI responsive
