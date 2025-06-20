@@ -23,6 +23,11 @@ impl ::std::default::Default for AppConfig {
     }
 }
 
+pub enum Tab {
+    Main,
+    Output,
+}
+
 pub struct MyApp {
     config: AppConfig,
     config_dirty: bool,
@@ -31,6 +36,7 @@ pub struct MyApp {
     ffmpeg_busy: Arc<AtomicBool>,
     tx: Option<Sender<String>>,
     should_start_next: Arc<Mutex<bool>>,
+    current_tab: Tab,
 }
 
 impl MyApp {
@@ -43,6 +49,7 @@ impl MyApp {
             ffmpeg_busy: Arc::new(AtomicBool::new(false)),
             tx: None,
             should_start_next: Arc::new(Mutex::new(false)),
+            current_tab: Tab::Main,
         })
     }
 
@@ -183,52 +190,73 @@ impl eframe::App for MyApp {
             }
         }
 
-        egui::CentralPanel::default().show(ctx, |ui| {
-            // Drag & drop handler
-            for file in ctx.input(|i| i.raw.dropped_files.clone()) {
-                if let Some(path) = file.path {
-                    self.video_queue.push(path);
-                }
-            }
-
+        // Draw top tab bar
+        egui::TopBottomPanel::top("tabs").show(ctx, |ui| {
             ui.horizontal(|ui| {
-                ui.label("Target size (MB):");
-                if ui.add(egui::DragValue::new(&mut self.config.target_size_mb)).changed() {
-                    self.config_dirty = true;
+                if ui.selectable_label(matches!(self.current_tab, Tab::Main), "Main").clicked() {
+                    self.current_tab = Tab::Main;
                 }
-
-                if self.config_dirty {
-                    confy::store("video_compressor_gui", None, &self.config).ok();
-                    self.config_dirty = false;
+                if ui.selectable_label(matches!(self.current_tab, Tab::Output), "FFmpeg Output").clicked() {
+                    self.current_tab = Tab::Output;
                 }
             });
-
-            if ui.add_sized(
-                egui::vec2(200.0, 40.0),
-                egui::Button::new(egui::RichText::new("Start Compression").strong()).wrap(),
-            ).clicked() {
-                self.start_ffmpeg_thread();
-            }
-
-            ui.separator();
-            ui.label("Queue:");
-            for file in &self.video_queue {
-                ui.label(file.to_string_lossy());
-            }
-
-            ui.separator();
-            ui.label("FFmpeg Output:");
-            egui::ScrollArea::vertical()
-                .stick_to_bottom(true)
-                .show(ui, |ui| {
-                    if let Ok(log) = self.ffmpeg_log.lock() {
-                        for line in log.iter() {
-                            ui.label(line);
-                        }
-                    }
-                });
         });
 
-        ctx.request_repaint(); // keep UI responsive
+        // Main panel based on current tab
+        egui::CentralPanel::default().show(ctx, |ui| {
+            match self.current_tab {
+                Tab::Main => {
+                    // Drag & drop handler
+                    for file in ctx.input(|i| i.raw.dropped_files.clone()) {
+                        if let Some(path) = file.path {
+                            self.video_queue.push(path);
+                        }
+                    }
+
+                    ui.horizontal(|ui| {
+                        ui.label("Target size (MB):");
+                        if ui.add(egui::DragValue::new(&mut self.config.target_size_mb)).changed() {
+                            self.config_dirty = true;
+                        }
+
+                        if self.config_dirty {
+                            confy::store("video_compressor_gui", None, &self.config).ok();
+                            self.config_dirty = false;
+                        }
+                    });
+
+                    if ui
+                        .add_sized(
+                            egui::vec2(200.0, 40.0),
+                            egui::Button::new(egui::RichText::new("Start Compression").strong()).wrap(),
+                        )
+                        .clicked()
+                    {
+                        self.start_ffmpeg_thread();
+                    }
+
+                    ui.separator();
+                    ui.label("Queue:");
+                    for file in &self.video_queue {
+                        ui.label(file.to_string_lossy());
+                    }
+                }
+
+                Tab::Output => {
+                    ui.heading("FFmpeg Output");
+                    egui::ScrollArea::vertical()
+                        .stick_to_bottom(true)
+                        .show(ui, |ui| {
+                            if let Ok(log) = self.ffmpeg_log.lock() {
+                                for line in log.iter() {
+                                    ui.label(line);
+                                }
+                            }
+                        });
+                }
+            }
+        });
+
+        ctx.request_repaint();
     }
 }
