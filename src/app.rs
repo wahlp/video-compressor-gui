@@ -278,14 +278,26 @@ impl eframe::App for MyApp {
 
                     ui.separator();
                     ui.label("Queue:");
-                    egui::Grid::new("queue_grid")
-                        .striped(true)
-                        .show(ui, |ui| {
-                            ui.label(egui::RichText::new("📋 Status").strong());
-                            ui.label(egui::RichText::new("📁 Filename").strong());
-                            ui.end_row();
 
-                            if let Ok(queue) = self.video_queue.lock() {
+                    let queue = self.video_queue.lock().unwrap();
+                    if queue.is_empty() {
+                        let available_height = ui.available_height();
+                        let prompt_height = 100.0; // approximate height of the prompt
+
+                        // Add space to center vertically
+                        ui.add_space((available_height - prompt_height) / 2.0);
+                        ui.vertical_centered(|ui| {
+                            ui.label(egui::RichText::new("📁").size(40.0));
+                            ui.label(egui::RichText::new("Drop video files here to begin").heading().weak());
+                        });
+                    } else {
+                        egui::Grid::new("queue_grid")
+                            .striped(true)
+                            .show(ui, |ui| {
+                                ui.label(egui::RichText::new("📋 Status").strong());
+                                ui.label(egui::RichText::new("📁 Filename").strong());
+                                ui.end_row();
+
                                 for item in queue.iter() {
                                     let emoji = match item.status {
                                         FileStatus::Waiting => "⏳",
@@ -296,8 +308,8 @@ impl eframe::App for MyApp {
                                     ui.label(item.path.file_name().unwrap_or_default().to_string_lossy());
                                     ui.end_row();
                                 }
-                            }
-                        });
+                            });
+                    }
                 }
 
                 Tab::Output => {
