@@ -130,6 +130,14 @@ impl MyApp {
                 args.splice(1..1, ["-r", fps_str]); // insert -r before -i
             }
 
+            // Print the full command string to the log
+            let cmd_string = format!("ffmpeg {}", args.iter()
+                .map(|s| shell_quote(s))
+                .collect::<Vec<_>>()
+                .join(" ")
+            );
+            log_tx.send(format!("Running command: {}", cmd_string)).ok();
+
             let mut cmd = Command::new("ffmpeg")
                 .args(args)
                 .stderr(Stdio::piped())
@@ -245,7 +253,7 @@ impl eframe::App for MyApp {
                 if ui.selectable_label(matches!(self.current_tab, Tab::Main), "Main").clicked() {
                     self.current_tab = Tab::Main;
                 }
-                if ui.selectable_label(matches!(self.current_tab, Tab::Output), "FFmpeg Output").clicked() {
+                if ui.selectable_label(matches!(self.current_tab, Tab::Output), "Debug Output").clicked() {
                     self.current_tab = Tab::Output;
                 }
             });
@@ -351,5 +359,15 @@ impl eframe::App for MyApp {
         });
 
         ctx.request_repaint();
+    }
+}
+
+fn shell_quote(arg: &str) -> String {
+    if arg.contains(' ') || arg.contains('"') || arg.contains('\'') {
+        // Escape existing quotes by backslash for safety (basic)
+        let escaped = arg.replace('"', "\\\"");
+        format!("\"{}\"", escaped)
+    } else {
+        arg.to_string()
     }
 }
