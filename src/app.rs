@@ -10,10 +10,26 @@ use serde::{Serialize, Deserialize};
 use confy;
 use eframe::egui;
 
+
+#[derive(Serialize, Deserialize, Clone, PartialEq)]
+pub enum Encoder {
+    CpuX264,
+    GpuNvenc,
+}
+
+impl Default for Encoder {
+    fn default() -> Self {
+        Encoder::CpuX264
+    }
+}
+
 #[derive(Serialize, Deserialize)]
 pub struct AppConfig {
     pub target_size_mb: u32,
     pub frame_rate: Option<u32>,
+
+    #[serde(default)]
+    pub encoder: Encoder,
 }
 
 impl ::std::default::Default for AppConfig {
@@ -21,6 +37,7 @@ impl ::std::default::Default for AppConfig {
         Self {
             target_size_mb: 10,
             frame_rate: None,
+            encoder: Encoder::CpuX264
         }
     }
 }
@@ -103,6 +120,7 @@ impl MyApp {
         let should_start_next_clone = Arc::clone(&self.should_start_next);
         let video_queue_clone = Arc::clone(&self.video_queue);
         let frame_rate_option = self.config.frame_rate;
+        let encoder = self.config.encoder.clone();
 
         thread::spawn(move || {
             let output_path = queue_item.with_extension("compressed.mp4");
@@ -119,7 +137,11 @@ impl MyApp {
 
             let mut args = vec![
                 "-i", queue_item.to_str().unwrap(),
-                "-c:v", "libx264",
+                "-c:v",
+                match encoder {
+                    Encoder::CpuX264 => "libx264",
+                    Encoder::GpuNvenc => "h264_nvenc",
+                },
                 "-b:v", &b_v,
                 "-c:a", "aac",
                 "-b:a", &b_a,
@@ -297,6 +319,17 @@ impl eframe::App for MyApp {
                             self.config_dirty = true;
                         }
                     });
+
+                    ui.horizontal(|ui| {
+                        ui.label("Encoder:");
+                        ui.selectable_value(&mut self.config.encoder, Encoder::CpuX264, "CPU (libx264)");
+                        ui.selectable_value(&mut self.config.encoder, Encoder::GpuNvenc, "GPU (h264_nvenc)");
+                    });
+
+                    if self.config_dirty {
+                        confy::store("video_compressor_gui", None, &self.config).ok();
+                        self.config_dirty = false;
+                    }
 
                     if ui
                         .add_sized(
