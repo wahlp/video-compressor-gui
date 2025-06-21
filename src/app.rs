@@ -300,7 +300,7 @@ impl eframe::App for MyApp {
 
                                 for item in queue.iter() {
                                     let emoji = match item.status {
-                                        FileStatus::Waiting => "⏳",
+                                        FileStatus::Waiting => "🕓",
                                         FileStatus::Processing => "🔄",
                                         FileStatus::Done => "✅",
                                     };
@@ -313,7 +313,6 @@ impl eframe::App for MyApp {
                 }
 
                 Tab::Output => {
-                    ui.heading("FFmpeg Output");
                     egui::ScrollArea::vertical()
                         .stick_to_bottom(true)
                         .show(ui, |ui| {
