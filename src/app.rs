@@ -23,6 +23,18 @@ impl ::std::default::Default for AppConfig {
     }
 }
 
+#[derive(PartialEq)]
+pub enum FileStatus {
+    Waiting,
+    Processing,
+    Done,
+}
+
+pub struct QueueItem {
+    pub path: PathBuf,
+    pub status: FileStatus,
+}
+
 pub enum Tab {
     Main,
     Output,
@@ -31,7 +43,7 @@ pub enum Tab {
 pub struct MyApp {
     config: AppConfig,
     config_dirty: bool,
-    video_queue: Vec<PathBuf>,
+    video_queue: Arc<Mutex<Vec<QueueItem>>>,
     ffmpeg_log: Arc<Mutex<Vec<String>>>,
     ffmpeg_busy: Arc<AtomicBool>,
     tx: Option<Sender<String>>,
@@ -44,7 +56,7 @@ impl MyApp {
         Ok(Self {
             config: confy::load("video_compressor_gui", None)?,
             config_dirty: false,
-            video_queue: vec![],
+            video_queue: Arc::new(Mutex::new(Vec::new())),
             ffmpeg_log: Arc::new(Mutex::new(Vec::new())),
             ffmpeg_busy: Arc::new(AtomicBool::new(false)),
             tx: None,
@@ -54,11 +66,29 @@ impl MyApp {
     }
 
     fn start_ffmpeg_thread(&mut self) {
-        if self.ffmpeg_busy.load(Ordering::SeqCst) || self.video_queue.is_empty() {
+        if self.ffmpeg_busy.load(Ordering::SeqCst) {
             return;
         }
 
-        let path = self.video_queue.remove(0);
+        let queue_item_path = {
+            let mut queue = match self.video_queue.lock() {
+                Ok(q) => q,
+                Err(_) => return,
+            };
+            if let Some(item) = queue.iter_mut().find(|i| matches!(i.status, FileStatus::Waiting)) {
+                item.status = FileStatus::Processing;
+                Some(item.path.clone())
+            } else {
+                None
+            }
+        };
+
+        let Some(queue_item) = queue_item_path else {
+            return;
+        };
+
+        let queue_item_clone = queue_item.clone();
+
         let (log_tx, log_rx): (Sender<String>, Receiver<String>) = mpsc::channel();
 
         self.ffmpeg_busy.store(true, Ordering::SeqCst);
@@ -66,17 +96,24 @@ impl MyApp {
 
         let target_size = self.config.target_size_mb * 1000;
 
+        let log_arc = Arc::clone(&self.ffmpeg_log);
+        let busy_flag = Arc::clone(&self.ffmpeg_busy);
+        let should_start_next_clone = Arc::clone(&self.should_start_next);
+        let video_queue_clone = Arc::clone(&self.video_queue);
+
         // Spawn thread to run FFmpeg
         thread::spawn(move || {
-            let output_path = path.with_extension("compressed.mp4");
+            let output_path = queue_item.with_extension("compressed.mp4");
 
-            // calculate desired bitrate
-            let Some((video_bitrate, audio_bitrate)) = calculate_bitrate(path.to_str().unwrap(), target_size) else { todo!() };
-            println!("Target size: {}, Video bitrate: {}, Audio bitrate: {}", target_size, video_bitrate, audio_bitrate);
+            let Some((video_bitrate, audio_bitrate)) = calculate_bitrate(queue_item.to_str().unwrap(), target_size) else {
+                log_tx.send("Failed to calculate bitrate.".to_string()).ok();
+                log_tx.send("[done]".to_string()).ok();
+                return;
+            };
 
             let mut cmd = Command::new("ffmpeg")
                 .args([
-                    "-i", path.to_str().unwrap(),
+                    "-i", queue_item.to_str().unwrap(),
                     "-r", "60",
                     "-c:v", "libx264",
                     "-b:v", &format!("{}", video_bitrate),
@@ -100,15 +137,16 @@ impl MyApp {
             log_tx.send("[done]".to_string()).ok();
         });
 
-        // Clone log and busy flag for the log reading thread
-        let log_arc = Arc::clone(&self.ffmpeg_log);
-        let busy_flag = Arc::clone(&self.ffmpeg_busy);
-        let should_start_next_clone = Arc::clone(&self.should_start_next);
-
+        // Handle log output + status change
         thread::spawn(move || {
             while let Ok(line) = log_rx.recv() {
                 if line == "[done]" {
                     busy_flag.store(false, Ordering::SeqCst);
+                    if let Ok(mut queue) = video_queue_clone.lock() {
+                        if let Some(item) = queue.iter_mut().find(|i| i.path == queue_item_clone) {
+                            item.status = FileStatus::Done;
+                        }
+                    }
                     if let Ok(mut flag) = should_start_next_clone.lock() {
                         *flag = true;
                     }
@@ -171,7 +209,7 @@ fn calculate_bitrate(video_path: &str, size_upper_bound: u32) -> Option<(u32, u3
 impl eframe::App for MyApp {
     fn update(&mut self, ctx: &egui::Context, _: &mut eframe::Frame) {
         // Automatically start next compression job if flagged
-        if !self.ffmpeg_busy.load(Ordering::SeqCst) && !self.video_queue.is_empty() {
+        if !self.ffmpeg_busy.load(Ordering::SeqCst) && !self.video_queue.lock().unwrap().is_empty() {
             let should_start = {
                 if let Ok(mut flag) = self.should_start_next.lock() {
                     if *flag {
@@ -209,7 +247,10 @@ impl eframe::App for MyApp {
                     // Drag & drop handler
                     for file in ctx.input(|i| i.raw.dropped_files.clone()) {
                         if let Some(path) = file.path {
-                            self.video_queue.push(path);
+                            self.video_queue.lock().unwrap().push(QueueItem {
+                                path,
+                                status: FileStatus::Waiting,
+                            });
                         }
                     }
 
@@ -237,9 +278,26 @@ impl eframe::App for MyApp {
 
                     ui.separator();
                     ui.label("Queue:");
-                    for file in &self.video_queue {
-                        ui.label(file.to_string_lossy());
-                    }
+                    egui::Grid::new("queue_grid")
+                        .striped(true)
+                        .show(ui, |ui| {
+                            ui.label(egui::RichText::new("📋 Status").strong());
+                            ui.label(egui::RichText::new("📁 Filename").strong());
+                            ui.end_row();
+
+                            if let Ok(queue) = self.video_queue.lock() {
+                                for item in queue.iter() {
+                                    let emoji = match item.status {
+                                        FileStatus::Waiting => "⏳",
+                                        FileStatus::Processing => "🔄",
+                                        FileStatus::Done => "✅",
+                                    };
+                                    ui.label(emoji);
+                                    ui.label(item.path.file_name().unwrap_or_default().to_string_lossy());
+                                    ui.end_row();
+                                }
+                            }
+                        });
                 }
 
                 Tab::Output => {
