@@ -13,12 +13,14 @@ use eframe::egui;
 #[derive(Serialize, Deserialize)]
 pub struct AppConfig {
     pub target_size_mb: u32,
+    pub frame_rate: Option<u32>,
 }
 
 impl ::std::default::Default for AppConfig {
     fn default() -> Self {
         Self {
             target_size_mb: 10,
+            frame_rate: None,
         }
     }
 }
@@ -100,8 +102,8 @@ impl MyApp {
         let busy_flag = Arc::clone(&self.ffmpeg_busy);
         let should_start_next_clone = Arc::clone(&self.should_start_next);
         let video_queue_clone = Arc::clone(&self.video_queue);
+        let frame_rate_option = self.config.frame_rate;
 
-        // Spawn thread to run FFmpeg
         thread::spawn(move || {
             let output_path = queue_item.with_extension("compressed.mp4");
 
@@ -111,16 +113,25 @@ impl MyApp {
                 return;
             };
 
+            let b_v = format!("{}", video_bitrate);
+            let b_a = format!("{}", audio_bitrate);
+            let fps_opt = frame_rate_option.map(|fps| fps.to_string());
+
+            let mut args = vec![
+                "-i", queue_item.to_str().unwrap(),
+                "-c:v", "libx264",
+                "-b:v", &b_v,
+                "-c:a", "aac",
+                "-b:a", &b_a,
+                "-y", output_path.to_str().unwrap(),
+            ];
+
+            if let Some(fps_str) = fps_opt.as_deref() {
+                args.splice(1..1, ["-r", fps_str]); // insert -r before -i
+            }
+
             let mut cmd = Command::new("ffmpeg")
-                .args([
-                    "-i", queue_item.to_str().unwrap(),
-                    "-r", "60",
-                    "-c:v", "libx264",
-                    "-b:v", &format!("{}", video_bitrate),
-                    "-c:a", "aac",
-                    "-b:a", &format!("{}", audio_bitrate),
-                    "-y", output_path.to_str().unwrap(),
-                ])
+                .args(args)
                 .stderr(Stdio::piped())
                 .spawn()
                 .expect("failed to run ffmpeg");
@@ -263,6 +274,19 @@ impl eframe::App for MyApp {
                         if self.config_dirty {
                             confy::store("video_compressor_gui", None, &self.config).ok();
                             self.config_dirty = false;
+                        }
+                    });
+
+                    ui.horizontal(|ui| {
+                        ui.label("Frame rate (optional):");
+                        let mut fr_string = self.config.frame_rate.map(|v| v.to_string()).unwrap_or_default();
+                        if ui.add_sized(
+                                egui::vec2(40.0, 20.0),
+                                egui::TextEdit::singleline(&mut fr_string)
+                            ).changed() 
+                        {
+                            self.config.frame_rate = fr_string.trim().parse().ok();
+                            self.config_dirty = true;
                         }
                     });
 
