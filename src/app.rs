@@ -134,7 +134,7 @@ impl MyApp {
 
             let b_v = format!("{}", video_bitrate);
             let b_a = format!("{}", audio_bitrate);
-            let fps_opt = frame_rate_option.map(|fps| fps.to_string());
+            let fps_opt = frame_rate_option.map(|fps| format!("fps={}", fps));
 
             let mut args = vec![
                 "-i", queue_item.to_str().unwrap(),
@@ -150,7 +150,7 @@ impl MyApp {
             ];
 
             if let Some(fps_str) = fps_opt.as_deref() {
-                args.splice(1..1, ["-r", fps_str]); // insert -r before -i
+                args.splice(2..2, ["-filter:v", fps_str]);
             }
 
             // Print the full command string to the log
