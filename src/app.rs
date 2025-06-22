@@ -56,6 +56,7 @@ pub struct QueueItem {
 
 pub enum Tab {
     Main,
+    Options,
     Output,
 }
 
@@ -275,6 +276,9 @@ impl eframe::App for MyApp {
                 if ui.selectable_label(matches!(self.current_tab, Tab::Main), "Main").clicked() {
                     self.current_tab = Tab::Main;
                 }
+                if ui.selectable_label(matches!(self.current_tab, Tab::Options), "Options").clicked() {
+                    self.current_tab = Tab::Options;
+                }
                 if ui.selectable_label(matches!(self.current_tab, Tab::Output), "Debug Output").clicked() {
                     self.current_tab = Tab::Output;
                 }
@@ -293,42 +297,6 @@ impl eframe::App for MyApp {
                                 status: FileStatus::Waiting,
                             });
                         }
-                    }
-
-                    ui.horizontal(|ui| {
-                        ui.label("Target size (MB):");
-                        if ui.add(egui::DragValue::new(&mut self.config.target_size_mb)).changed() {
-                            self.config_dirty = true;
-                        }
-
-                        if self.config_dirty {
-                            confy::store("video_compressor_gui", None, &self.config).ok();
-                            self.config_dirty = false;
-                        }
-                    });
-
-                    ui.horizontal(|ui| {
-                        ui.label("Frame rate (optional):");
-                        let mut fr_string = self.config.frame_rate.map(|v| v.to_string()).unwrap_or_default();
-                        if ui.add_sized(
-                                egui::vec2(40.0, 20.0),
-                                egui::TextEdit::singleline(&mut fr_string)
-                            ).changed() 
-                        {
-                            self.config.frame_rate = fr_string.trim().parse().ok();
-                            self.config_dirty = true;
-                        }
-                    });
-
-                    ui.horizontal(|ui| {
-                        ui.label("Encoder:");
-                        ui.selectable_value(&mut self.config.encoder, Encoder::CpuX264, "CPU (libx264)");
-                        ui.selectable_value(&mut self.config.encoder, Encoder::GpuNvenc, "GPU (h264_nvenc)");
-                    });
-
-                    if self.config_dirty {
-                        confy::store("video_compressor_gui", None, &self.config).ok();
-                        self.config_dirty = false;
                     }
 
                     if ui
@@ -374,6 +342,45 @@ impl eframe::App for MyApp {
                                     ui.end_row();
                                 }
                             });
+                    }
+                }
+
+                Tab::Options => {
+
+                    ui.horizontal(|ui| {
+                        ui.label("Target size (MB):");
+                        if ui.add(egui::DragValue::new(&mut self.config.target_size_mb)).changed() {
+                            self.config_dirty = true;
+                        }
+
+                        if self.config_dirty {
+                            confy::store("video_compressor_gui", None, &self.config).ok();
+                            self.config_dirty = false;
+                        }
+                    });
+
+                    ui.horizontal(|ui| {
+                        ui.label("Frame rate (optional):");
+                        let mut fr_string = self.config.frame_rate.map(|v| v.to_string()).unwrap_or_default();
+                        if ui.add_sized(
+                                egui::vec2(40.0, 20.0),
+                                egui::TextEdit::singleline(&mut fr_string)
+                            ).changed() 
+                        {
+                            self.config.frame_rate = fr_string.trim().parse().ok();
+                            self.config_dirty = true;
+                        }
+                    });
+
+                    ui.horizontal(|ui| {
+                        ui.label("Encoder:");
+                        ui.selectable_value(&mut self.config.encoder, Encoder::CpuX264, "CPU (libx264)");
+                        ui.selectable_value(&mut self.config.encoder, Encoder::GpuNvenc, "GPU (h264_nvenc)");
+                    });
+
+                    if self.config_dirty {
+                        confy::store("video_compressor_gui", None, &self.config).ok();
+                        self.config_dirty = false;
                     }
                 }
 
