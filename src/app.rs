@@ -374,8 +374,8 @@ impl eframe::App for MyApp {
 
                     ui.horizontal(|ui| {
                         ui.label("Encoder:");
-                        ui.selectable_value(&mut self.config.encoder, Encoder::CpuX264, "CPU (libx264)");
-                        ui.selectable_value(&mut self.config.encoder, Encoder::GpuNvenc, "GPU (h264_nvenc)");
+                        ui.selectable_value(&mut self.config.encoder, Encoder::CpuX264, "CPU");
+                        ui.selectable_value(&mut self.config.encoder, Encoder::GpuNvenc, "GPU, faster but larger files than CPU");
                     });
 
                     if self.config_dirty {
