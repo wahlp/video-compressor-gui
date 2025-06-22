@@ -52,6 +52,7 @@ pub enum FileStatus {
 pub struct QueueItem {
     pub path: PathBuf,
     pub status: FileStatus,
+    pub size_bytes: u64,
 }
 
 pub enum Tab {
@@ -292,10 +293,14 @@ impl eframe::App for MyApp {
                     // Drag & drop handler
                     for file in ctx.input(|i| i.raw.dropped_files.clone()) {
                         if let Some(path) = file.path {
-                            self.video_queue.lock().unwrap().push(QueueItem {
-                                path,
-                                status: FileStatus::Waiting,
-                            });
+                            if let Ok(metadata) = std::fs::metadata(&path) {
+                                let size_bytes = metadata.len();
+                                self.video_queue.lock().unwrap().push(QueueItem {
+                                    path,
+                                    size_bytes,
+                                    status: FileStatus::Waiting,
+                                });
+                            }
                         }
                     }
 
@@ -327,8 +332,9 @@ impl eframe::App for MyApp {
                         egui::Grid::new("queue_grid")
                             .striped(true)
                             .show(ui, |ui| {
-                                ui.label(egui::RichText::new("📋 Status").strong());
-                                ui.label(egui::RichText::new("📁 Filename").strong());
+                                ui.label(egui::RichText::new("Status").strong());
+                                ui.label(egui::RichText::new("Filename").strong());
+                                ui.label(egui::RichText::new("Size").strong());
                                 ui.end_row();
 
                                 for item in queue.iter() {
@@ -339,6 +345,7 @@ impl eframe::App for MyApp {
                                     };
                                     ui.label(emoji);
                                     ui.label(item.path.file_name().unwrap_or_default().to_string_lossy());
+                                    ui.label(format_size(item.size_bytes));
                                     ui.end_row();
                                 }
                             });
@@ -409,5 +416,22 @@ fn shell_quote(arg: &str) -> String {
         format!("\"{}\"", escaped)
     } else {
         arg.to_string()
+    }
+}
+
+fn format_size(bytes: u64) -> String {
+    const KB: f64 = 1024.0;
+    const MB: f64 = KB * 1024.0;
+    const GB: f64 = MB * 1024.0;
+
+    let b = bytes as f64;
+    if b < KB {
+        format!("{:.0} B", b)
+    } else if b < MB {
+        format!("{:.1} KB", b / KB)
+    } else if b < GB {
+        format!("{:.1} MB", b / MB)
+    } else {
+        format!("{:.2} GB", b / GB)
     }
 }
