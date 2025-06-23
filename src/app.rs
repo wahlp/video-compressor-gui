@@ -402,10 +402,15 @@ impl eframe::App for MyApp {
 
                     ui.horizontal(|ui| {
                         ui.label("Encoder:");
-                        ui.selectable_value(&mut self.config.encoder, Encoder::CpuX264, "CPU");
+                        ui.selectable_value(&mut self.config.encoder, Encoder::CpuX264, "CPU")
+                            .changed().then(|| {
+                                self.config_dirty = true;
+                            });
                         ui.selectable_value(&mut self.config.encoder, Encoder::GpuNvenc, "GPU")
                             .on_hover_ui(|ui| {
                                 ui.label("Faster than CPU, but produces larger file size");
+                            }).changed().then(|| {
+                                self.config_dirty = true;
                             });
                     });
 
