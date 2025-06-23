@@ -10,7 +10,9 @@ use serde::{Serialize, Deserialize};
 use confy;
 use eframe::egui;
 
+const PROGRAM_CONFIG_NAME: &str = "video_compressor_gui";
 
+// ffmpeg encoder parameter
 #[derive(Serialize, Deserialize, Clone, PartialEq)]
 pub enum Encoder {
     CpuX264,
@@ -23,6 +25,7 @@ impl Default for Encoder {
     }
 }
 
+// compression options
 #[derive(Serialize, Deserialize)]
 pub struct AppConfig {
     pub target_size_mb: u32,
@@ -75,7 +78,7 @@ pub struct MyApp {
 impl MyApp {
     pub fn load() -> Result<Self, confy::ConfyError> {
         Ok(Self {
-            config: confy::load("video_compressor_gui", None)?,
+            config: confy::load(PROGRAM_CONFIG_NAME, None)?,
             config_dirty: false,
             video_queue: Arc::new(Mutex::new(Vec::new())),
             ffmpeg_log: Arc::new(Mutex::new(Vec::new())),
@@ -115,7 +118,7 @@ impl MyApp {
         self.ffmpeg_busy.store(true, Ordering::SeqCst);
         self.tx = Some(log_tx.clone());
 
-        let target_size = self.config.target_size_mb * 1000;
+        let target_size_mb = self.config.target_size_mb * 1000;
 
         let log_arc = Arc::clone(&self.ffmpeg_log);
         let busy_flag = Arc::clone(&self.ffmpeg_busy);
@@ -125,9 +128,8 @@ impl MyApp {
         let encoder = self.config.encoder.clone();
 
         thread::spawn(move || {
-            let output_path = queue_item.with_extension("compressed.mp4");
 
-            let Some((video_bitrate, audio_bitrate)) = calculate_bitrate(queue_item.to_str().unwrap(), target_size) else {
+            let Some((video_bitrate, audio_bitrate)) = calculate_bitrate(queue_item.to_str().unwrap(), target_size_mb) else {
                 log_tx.send("Failed to calculate bitrate.".to_string()).ok();
                 log_tx.send("[done]".to_string()).ok();
                 return;
@@ -135,8 +137,8 @@ impl MyApp {
 
             let b_v = format!("{}", video_bitrate);
             let b_a = format!("{}", audio_bitrate);
-            let fps_opt = frame_rate_option.map(|fps| format!("fps={}", fps));
 
+            let output_path = queue_item.with_extension("compressed.mp4");
             let mut args = vec![
                 "-i", queue_item.to_str().unwrap(),
                 "-c:v",
@@ -150,6 +152,7 @@ impl MyApp {
                 "-y", output_path.to_str().unwrap(),
             ];
 
+            let fps_opt = frame_rate_option.map(|fps| format!("fps={}", fps));
             if let Some(fps_str) = fps_opt.as_deref() {
                 args.splice(2..2, ["-filter:v", fps_str]);
             }
@@ -203,6 +206,7 @@ impl MyApp {
     }
 }
 
+// read input video file's parameters to calculate output file's parameters later
 fn get_duration_and_audio_bitrate(path: &str) -> Option<(f64, u32)> {
     let output = Command::new("ffprobe")
         .args([
@@ -222,28 +226,28 @@ fn get_duration_and_audio_bitrate(path: &str) -> Option<(f64, u32)> {
     let stdout = String::from_utf8_lossy(&output.stdout);
     let mut lines = stdout.lines();
     
-    let bitrate = lines.next()?.trim().parse::<u32>().ok()?; // in bits/sec
+    let bitrate = lines.next()?.trim().parse::<u32>().ok()?;
     let duration = lines.next()?.trim().parse::<f64>().ok()?;
     
     Some((duration, bitrate))
 }
 
-fn calculate_bitrate(video_path: &str, size_upper_bound: u32) -> Option<(u32, u32)> {
+fn calculate_bitrate(video_path: &str, size_upper_bound_mb: u32) -> Option<(u32, u32)> {
     let (duration, mut audio_bitrate) = get_duration_and_audio_bitrate(video_path)?;
-    let gib_to_gb_conversion = 1.073741824;
-    let target_total_bitrate = (size_upper_bound * 1024 * 8) as f64 / (gib_to_gb_conversion * duration);
 
+    // calculate the allowed bits per second to reach target output file size
+    let gib_to_gb_conversion = 1.073741824;
+    let target_total_bitrate = (size_upper_bound_mb * 1024 * 8) as f64 / (gib_to_gb_conversion * duration);
+
+    // allocate some bitrate for audio
     let min_audio_bitrate = 64000;
     let max_audio_bitrate = 256000;
     if 10.0 * audio_bitrate as f64 > target_total_bitrate {
         audio_bitrate = (target_total_bitrate / 10.0) as u32;
-        if audio_bitrate < min_audio_bitrate as u32 {
-            audio_bitrate = min_audio_bitrate as u32;
-        } else if audio_bitrate > max_audio_bitrate as u32 {
-            audio_bitrate = max_audio_bitrate as u32;
-        }
+        audio_bitrate = audio_bitrate.clamp(min_audio_bitrate, max_audio_bitrate)
     }
     
+    // spend the remaining bitrate on video
     let video_bitrate = (target_total_bitrate as u32).saturating_sub(audio_bitrate);
 
     Some((video_bitrate, audio_bitrate))
@@ -315,12 +319,11 @@ impl eframe::App for MyApp {
                     }
 
                     ui.separator();
-                    ui.label("Queue:");
 
                     let queue = self.video_queue.lock().unwrap();
                     if queue.is_empty() {
                         let available_height = ui.available_height();
-                        let prompt_height = 100.0; // approximate height of the prompt
+                        let prompt_height = 120.0; // approximate height of the prompt
 
                         // Add space to center vertically
                         ui.add_space((available_height - prompt_height) / 2.0);
@@ -329,6 +332,7 @@ impl eframe::App for MyApp {
                             ui.label(egui::RichText::new("Drop video files here to begin").heading().weak());
                         });
                     } else {
+                        ui.label("Queue:");
                         egui::Grid::new("queue_grid")
                             .striped(true)
                             .show(ui, |ui| {
@@ -353,16 +357,10 @@ impl eframe::App for MyApp {
                 }
 
                 Tab::Options => {
-
                     ui.horizontal(|ui| {
                         ui.label("Target size (MB):");
                         if ui.add(egui::DragValue::new(&mut self.config.target_size_mb)).changed() {
                             self.config_dirty = true;
-                        }
-
-                        if self.config_dirty {
-                            confy::store("video_compressor_gui", None, &self.config).ok();
-                            self.config_dirty = false;
                         }
                     });
 
@@ -386,7 +384,7 @@ impl eframe::App for MyApp {
                     });
 
                     if self.config_dirty {
-                        confy::store("video_compressor_gui", None, &self.config).ok();
+                        confy::store(PROGRAM_CONFIG_NAME, None, &self.config).ok();
                         self.config_dirty = false;
                     }
                 }
