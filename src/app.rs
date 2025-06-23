@@ -28,11 +28,20 @@ impl Default for Encoder {
 // compression options
 #[derive(Serialize, Deserialize)]
 pub struct AppConfig {
+    #[serde(default = "default_target_size")]
     pub target_size_mb: u32,
-    pub frame_rate: Option<u32>,
 
+    pub frame_rate: Option<u32>,
+    
     #[serde(default)]
     pub encoder: Encoder,
+
+    #[serde(default)]
+    pub dark_mode_enabled: bool,
+}
+
+fn default_target_size() -> u32 {
+    10
 }
 
 impl ::std::default::Default for AppConfig {
@@ -40,7 +49,8 @@ impl ::std::default::Default for AppConfig {
         Self {
             target_size_mb: 10,
             frame_rate: None,
-            encoder: Encoder::CpuX264
+            encoder: Encoder::CpuX264,
+            dark_mode_enabled: false,
         }
     }
 }
@@ -129,7 +139,6 @@ impl MyApp {
         let encoder = self.config.encoder.clone();
 
         thread::spawn(move || {
-
             let Some((video_bitrate, audio_bitrate)) = calculate_bitrate(queue_item.to_str().unwrap(), target_size_mb) else {
                 log_tx.send("Failed to calculate bitrate.".to_string()).ok();
                 log_tx.send("[done]".to_string()).ok();
@@ -205,6 +214,14 @@ impl MyApp {
             }
         });
     }
+
+    fn apply_theme(&mut self, ctx: &egui::Context) {
+        if self.config.dark_mode_enabled {
+            ctx.set_theme(egui::Theme::Dark);
+        } else {
+            ctx.set_theme(egui::Theme::Light);
+        }
+    }
 }
 
 // read input video file's parameters to calculate output file's parameters later
@@ -257,6 +274,7 @@ fn calculate_bitrate(video_path: &str, size_upper_bound_mb: u32) -> Option<(u32,
 impl eframe::App for MyApp {
     fn update(&mut self, ctx: &egui::Context, _: &mut eframe::Frame) {
         ctx.set_zoom_factor(1.2);
+        self.apply_theme(ctx);
         
         // Automatically start next compression job if flagged
         if !self.ffmpeg_busy.load(Ordering::SeqCst) && !self.video_queue.lock().unwrap().is_empty() {
@@ -360,6 +378,8 @@ impl eframe::App for MyApp {
                 }
 
                 Tab::Options => {
+                    ui.label(egui::RichText::new("Compression").strong());
+
                     ui.horizontal(|ui| {
                         ui.label("Target size (MB):");
                         if ui.add(egui::DragValue::new(&mut self.config.target_size_mb)).changed() {
@@ -383,7 +403,21 @@ impl eframe::App for MyApp {
                     ui.horizontal(|ui| {
                         ui.label("Encoder:");
                         ui.selectable_value(&mut self.config.encoder, Encoder::CpuX264, "CPU");
-                        ui.selectable_value(&mut self.config.encoder, Encoder::GpuNvenc, "GPU, faster but larger files than CPU");
+                        ui.selectable_value(&mut self.config.encoder, Encoder::GpuNvenc, "GPU")
+                            .on_hover_ui(|ui| {
+                                ui.label("Faster than CPU, but produces larger file size");
+                            });
+                    });
+
+                    ui.add_space(15.0);
+                    ui.label(egui::RichText::new("Program").strong());
+                    
+                    ui.horizontal(|ui| {
+                        ui.label("Theme:");
+                        ui.checkbox(&mut self.config.dark_mode_enabled, "Dark Mode").changed().then(|| {
+                            self.apply_theme(ctx);
+                            self.config_dirty = true;
+                        });
                     });
 
                     if self.config_dirty {
