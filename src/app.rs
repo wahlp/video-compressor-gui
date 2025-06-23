@@ -45,13 +45,14 @@ impl ::std::default::Default for AppConfig {
     }
 }
 
-#[derive(PartialEq)]
+#[derive(PartialEq, Clone)]
 pub enum FileStatus {
     Waiting,
     Processing,
     Done,
 }
 
+#[derive(Clone)]
 pub struct QueueItem {
     pub path: PathBuf,
     pub status: FileStatus,
@@ -255,6 +256,8 @@ fn calculate_bitrate(video_path: &str, size_upper_bound_mb: u32) -> Option<(u32,
 
 impl eframe::App for MyApp {
     fn update(&mut self, ctx: &egui::Context, _: &mut eframe::Frame) {
+        // ctx.set_zoom_factor(2.0);
+        
         // Automatically start next compression job if flagged
         if !self.ffmpeg_busy.load(Ordering::SeqCst) && !self.video_queue.lock().unwrap().is_empty() {
             let should_start = {
@@ -308,30 +311,30 @@ impl eframe::App for MyApp {
                         }
                     }
 
-                    if ui
-                        .add_sized(
-                            egui::vec2(200.0, 40.0),
-                            egui::Button::new(egui::RichText::new("Start Compression").strong()).wrap(),
-                        )
-                        .clicked()
-                    {
-                        self.start_ffmpeg_thread();
-                    }
-
-                    ui.separator();
-
-                    let queue = self.video_queue.lock().unwrap();
+                    let queue = self.video_queue.lock().unwrap().clone();
                     if queue.is_empty() {
-                        let available_height = ui.available_height();
-                        let prompt_height = 120.0; // approximate height of the prompt
-
                         // Add space to center vertically
+                        let available_height = ui.available_height();
+                        let prompt_height = 120.0;
                         ui.add_space((available_height - prompt_height) / 2.0);
+
                         ui.vertical_centered(|ui| {
                             ui.label(egui::RichText::new("📁").size(40.0));
                             ui.label(egui::RichText::new("Drop video files here to begin").heading().weak());
                         });
                     } else {
+                        if ui
+                            .add_sized(
+                                egui::vec2(200.0, 40.0),
+                                egui::Button::new(egui::RichText::new("Start Compression").strong()).wrap(),
+                            )
+                            .clicked()
+                        {
+                            self.start_ffmpeg_thread();
+                        }
+
+                        ui.separator();
+
                         ui.label("Queue:");
                         egui::Grid::new("queue_grid")
                             .striped(true)
