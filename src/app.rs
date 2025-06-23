@@ -81,7 +81,6 @@ pub struct MyApp {
     video_queue: Arc<Mutex<Vec<QueueItem>>>,
     ffmpeg_log: Arc<Mutex<Vec<String>>>,
     ffmpeg_busy: Arc<AtomicBool>,
-    tx: Option<Sender<String>>,
     should_start_next: Arc<Mutex<bool>>,
     current_tab: Tab,
 }
@@ -94,7 +93,6 @@ impl MyApp {
             video_queue: Arc::new(Mutex::new(Vec::new())),
             ffmpeg_log: Arc::new(Mutex::new(Vec::new())),
             ffmpeg_busy: Arc::new(AtomicBool::new(false)),
-            tx: None,
             should_start_next: Arc::new(Mutex::new(false)),
             current_tab: Tab::Main,
         })
@@ -122,14 +120,7 @@ impl MyApp {
             return;
         };
 
-        let queue_item_clone = queue_item.clone();
-
-        let (log_tx, log_rx): (Sender<String>, Receiver<String>) = mpsc::channel();
-
         self.ffmpeg_busy.store(true, Ordering::SeqCst);
-        self.tx = Some(log_tx.clone());
-
-        let target_size_mb = self.config.target_size_mb * 1000;
 
         let log_arc = Arc::clone(&self.ffmpeg_log);
         let busy_flag = Arc::clone(&self.ffmpeg_busy);
@@ -137,6 +128,9 @@ impl MyApp {
         let video_queue_clone = Arc::clone(&self.video_queue);
         let frame_rate_option = self.config.frame_rate;
         let encoder = self.config.encoder.clone();
+        let (log_tx, log_rx): (Sender<String>, Receiver<String>) = mpsc::channel();
+        let queue_item_clone = queue_item.clone();
+        let target_size_mb = self.config.target_size_mb;
 
         thread::spawn(move || {
             let Some((video_bitrate, audio_bitrate)) = calculate_bitrate(queue_item.to_str().unwrap(), target_size_mb) else {
@@ -255,7 +249,7 @@ fn calculate_bitrate(video_path: &str, size_upper_bound_mb: u32) -> Option<(u32,
 
     // calculate the allowed bits per second to reach target output file size
     let gib_to_gb_conversion = 1.073741824;
-    let target_total_bitrate = (size_upper_bound_mb * 1024 * 8) as f64 / (gib_to_gb_conversion * duration);
+    let target_total_bitrate = (size_upper_bound_mb * 1000 * 1000 * 8) as f64 / (gib_to_gb_conversion * duration);
 
     // allocate some bitrate for audio
     let min_audio_bitrate = 64000;
