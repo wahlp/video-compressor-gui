@@ -256,7 +256,7 @@ fn calculate_bitrate(video_path: &str, size_upper_bound_mb: u32) -> Option<(u32,
 
 impl eframe::App for MyApp {
     fn update(&mut self, ctx: &egui::Context, _: &mut eframe::Frame) {
-        // ctx.set_zoom_factor(2.0);
+        ctx.set_zoom_factor(1.2);
         
         // Automatically start next compression job if flagged
         if !self.ffmpeg_busy.load(Ordering::SeqCst) && !self.video_queue.lock().unwrap().is_empty() {
