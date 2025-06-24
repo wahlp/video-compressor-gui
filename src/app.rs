@@ -25,6 +25,34 @@ impl Default for Encoder {
     }
 }
 
+// resolution scaling
+#[derive(Serialize, Deserialize, Clone, PartialEq)]
+pub enum Resolution {
+    R1080,
+    R720,
+    R480,
+}
+
+impl Resolution {
+    fn to_height(&self) -> u32 {
+        match self {
+            Resolution::R1080 => 1080,
+            Resolution::R720 => 720,
+            Resolution::R480 => 480,
+        }
+    }
+}
+
+impl std::fmt::Display for Resolution {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Resolution::R1080 => write!(f, "1080p"),
+            Resolution::R720 => write!(f, "720p"),
+            Resolution::R480 => write!(f, "480p"),
+        }
+    }
+}
+
 // compression options
 #[derive(Serialize, Deserialize)]
 pub struct AppConfig {
@@ -38,6 +66,8 @@ pub struct AppConfig {
 
     #[serde(default)]
     pub dark_mode_enabled: bool,
+
+    pub resolution: Option<Resolution>,
 }
 
 fn default_target_size() -> u32 {
@@ -51,6 +81,7 @@ impl ::std::default::Default for AppConfig {
             frame_rate: None,
             encoder: Encoder::CpuX264,
             dark_mode_enabled: false,
+            resolution: None,
         }
     }
 }
@@ -132,6 +163,7 @@ impl MyApp {
         let (log_tx, log_rx): (Sender<String>, Receiver<String>) = mpsc::channel();
         let queue_item_clone = queue_item.clone();
         let target_size_mb = self.config.target_size_mb;
+        let resolution = self.config.resolution.clone();
 
         thread::spawn(move || {
             let Some((video_bitrate, audio_bitrate)) = calculate_bitrate(queue_item.to_str().unwrap(), target_size_mb) else {
@@ -157,10 +189,17 @@ impl MyApp {
                 "-y", output_path.to_str().unwrap(),
             ];
 
-            // insert fps parameter if specified
-            let fps_opt = frame_rate_option.map(|fps| format!("fps={}", fps));
-            if let Some(fps_str) = fps_opt.as_deref() {
-                args.splice(2..2, ["-filter:v", fps_str]);
+            // insert optional parameters if specified
+            let mut filters = Vec::new();
+            if let Some(fps) = frame_rate_option {
+                filters.push(format!("fps={}", fps));
+            }
+            if let Some(res) = &resolution {
+                filters.push(format!("scale=-2:{}", res.to_height()));
+            }
+            let filters_str = filters.join(",");
+            if !filters.is_empty() {
+                args.splice(2..2, ["-filter:v", &filters_str]);
             }
 
             // dump command string to the log for debugging
@@ -429,6 +468,29 @@ impl eframe::App for MyApp {
                                 self.config_dirty = true;
                             });
                     });
+
+                    ui.horizontal(|ui| {
+                        ui.label("Resolution:");
+                        let current = &mut self.config.resolution;
+
+                        let options = [
+                            (None, "Original"),
+                            (Some(Resolution::R1080), "1080p"),
+                            (Some(Resolution::R720), "720p"),
+                            (Some(Resolution::R480), "480p"),
+                        ];
+
+                        for (val, label) in options {
+                            if ui
+                                .selectable_label(current == &val, label)
+                                .clicked()
+                            {
+                                *current = val.clone();
+                                self.config_dirty = true;
+                            }
+                        }
+                    });
+
 
                     ui.add_space(15.0);
                     ui.label(egui::RichText::new("Program").strong());
