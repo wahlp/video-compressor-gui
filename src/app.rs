@@ -10,6 +10,8 @@ use serde::{Serialize, Deserialize};
 use confy;
 use eframe::egui;
 
+use crate::utils;
+
 const PROGRAM_CONFIG_NAME: &str = "video_compressor_gui";
 
 // ffmpeg encoder parameter
@@ -204,7 +206,7 @@ impl MyApp {
 
             // dump command string to the log for debugging
             let cmd_string = format!("ffmpeg {}", args.iter()
-                .map(|s| shell_quote(s))
+                .map(|s| utils::shell_quote(s))
                 .collect::<Vec<_>>()
                 .join(" ")
             );
@@ -308,11 +310,9 @@ fn calculate_bitrate(video_path: &str, size_upper_bound_mb: u32) -> Option<(u32,
     let target_total_bitrate = (size_upper_bound_mb * 1000 * 1000 * 8) as f64 / (gib_to_gb_conversion * duration);
 
     // allocate some bitrate for audio
-    let min_audio_bitrate = 64000;
-    let max_audio_bitrate = 256000;
     if 10.0 * audio_bitrate as f64 > target_total_bitrate {
         audio_bitrate = (target_total_bitrate / 10.0) as u32;
-        audio_bitrate = audio_bitrate.clamp(min_audio_bitrate, max_audio_bitrate)
+        audio_bitrate = audio_bitrate.clamp(64_000, 256_000)
     }
     
     // spend the remaining bitrate on video
@@ -422,9 +422,9 @@ impl eframe::App for MyApp {
                                     };
                                     ui.label(emoji);
                                     ui.label(item.path.file_name().unwrap_or_default().to_string_lossy());
-                                    ui.label(format_size(item.size_bytes));
+                                    ui.label(utils::format_size(item.size_bytes));
                                     ui.label(
-                                        item.output_size_bytes.map(format_size).unwrap_or_else(|| "-".to_string())
+                                        item.output_size_bytes.map(utils::format_size).unwrap_or_else(|| "-".to_string())
                                     );
                                     ui.end_row();
                                 }
@@ -524,32 +524,5 @@ impl eframe::App for MyApp {
         });
 
         ctx.request_repaint();
-    }
-}
-
-fn shell_quote(arg: &str) -> String {
-    if arg.contains(' ') || arg.contains('"') || arg.contains('\'') {
-        // Escape existing quotes by backslash for safety (basic)
-        let escaped = arg.replace('"', "\\\"");
-        format!("\"{}\"", escaped)
-    } else {
-        arg.to_string()
-    }
-}
-
-fn format_size(bytes: u64) -> String {
-    const KB: f64 = 1024.0;
-    const MB: f64 = KB * 1024.0;
-    const GB: f64 = MB * 1024.0;
-
-    let b = bytes as f64;
-    if b < KB {
-        format!("{:.0} B", b)
-    } else if b < MB {
-        format!("{:.1} KB", b / KB)
-    } else if b < GB {
-        format!("{:.1} MB", b / MB)
-    } else {
-        format!("{:.2} GB", b / GB)
     }
 }
