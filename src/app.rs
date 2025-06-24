@@ -132,6 +132,17 @@ impl MyApp {
         })
     }
 
+    fn reset_config_to_default(&mut self) {
+        let dark_mode = self.config.dark_mode_enabled;
+
+        self.config = AppConfig {
+            dark_mode_enabled: dark_mode,
+            ..Default::default()
+        };
+
+        self.config_dirty = true;
+    }
+
     fn start_ffmpeg_thread(&mut self) {
         if self.ffmpeg_busy.load(Ordering::SeqCst) {
             return;
@@ -491,6 +502,10 @@ impl eframe::App for MyApp {
                         }
                     });
 
+                    ui.add_space(15.0);
+                    if ui.button("Reset to Defaults").clicked() {
+                        self.reset_config_to_default();
+                    }
 
                     ui.add_space(15.0);
                     ui.label(egui::RichText::new("Program").strong());
