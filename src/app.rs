@@ -67,6 +67,7 @@ pub struct QueueItem {
     pub path: PathBuf,
     pub status: FileStatus,
     pub size_bytes: u64,
+    pub output_size_bytes: Option<u64>,
 }
 
 pub enum Tab {
@@ -139,9 +140,9 @@ impl MyApp {
                 return;
             };
 
+            // build command string
             let b_v = format!("{}", video_bitrate);
             let b_a = format!("{}", audio_bitrate);
-
             let output_path = queue_item.with_extension("compressed.mp4");
             let mut args = vec![
                 "-i", queue_item.to_str().unwrap(),
@@ -156,12 +157,13 @@ impl MyApp {
                 "-y", output_path.to_str().unwrap(),
             ];
 
+            // insert fps parameter if specified
             let fps_opt = frame_rate_option.map(|fps| format!("fps={}", fps));
             if let Some(fps_str) = fps_opt.as_deref() {
                 args.splice(2..2, ["-filter:v", fps_str]);
             }
 
-            // Print the full command string to the log
+            // dump command string to the log for debugging
             let cmd_string = format!("ffmpeg {}", args.iter()
                 .map(|s| shell_quote(s))
                 .collect::<Vec<_>>()
@@ -169,6 +171,7 @@ impl MyApp {
             );
             log_tx.send(format!("Running command: {}", cmd_string)).ok();
 
+            // run the command
             let mut cmd = Command::new("ffmpeg")
                 .args(args)
                 .stderr(Stdio::piped())
@@ -182,14 +185,20 @@ impl MyApp {
                     log_tx.send(line).ok();
                 }
             }
-
             cmd.wait().ok();
+
+            // check output file size
+            if let Ok(metadata) = std::fs::metadata(&output_path) {
+                let size = metadata.len();
+                log_tx.send(format!("[output_size]:{}", size)).ok();
+            }
+
             log_tx.send("[done]".to_string()).ok();
         });
 
-        // Handle log output + status change
         thread::spawn(move || {
             while let Ok(line) = log_rx.recv() {
+                // when job completes, update flags and file status
                 if line == "[done]" {
                     busy_flag.store(false, Ordering::SeqCst);
                     if let Ok(mut queue) = video_queue_clone.lock() {
@@ -199,6 +208,14 @@ impl MyApp {
                     }
                     if let Ok(mut flag) = should_start_next_clone.lock() {
                         *flag = true;
+                    }
+                } else if let Some(size_str) = line.strip_prefix("[output_size]:") {
+                    if let Ok(size) = size_str.parse::<u64>() {
+                        if let Ok(mut queue) = video_queue_clone.lock() {
+                            if let Some(item) = queue.iter_mut().find(|i| i.path == queue_item_clone) {
+                                item.output_size_bytes = Some(size);
+                            }
+                        }
                     }
                 } else {
                     if let Ok(mut log) = log_arc.lock() {
@@ -318,6 +335,7 @@ impl eframe::App for MyApp {
                                     path,
                                     size_bytes,
                                     status: FileStatus::Waiting,
+                                    output_size_bytes: None,
                                 });
                             }
                         }
@@ -353,7 +371,8 @@ impl eframe::App for MyApp {
                             .show(ui, |ui| {
                                 ui.label(egui::RichText::new("Status").strong());
                                 ui.label(egui::RichText::new("Filename").strong());
-                                ui.label(egui::RichText::new("Size").strong());
+                                ui.label(egui::RichText::new("Input Size").strong());
+                                ui.label(egui::RichText::new("Output Size").strong());
                                 ui.end_row();
 
                                 for item in queue.iter() {
@@ -365,6 +384,9 @@ impl eframe::App for MyApp {
                                     ui.label(emoji);
                                     ui.label(item.path.file_name().unwrap_or_default().to_string_lossy());
                                     ui.label(format_size(item.size_bytes));
+                                    ui.label(
+                                        item.output_size_bytes.map(format_size).unwrap_or_else(|| "-".to_string())
+                                    );
                                     ui.end_row();
                                 }
                             });
