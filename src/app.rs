@@ -55,6 +55,44 @@ impl std::fmt::Display for Resolution {
     }
 }
 
+// https://trac.ffmpeg.org/wiki/Encode/H.264#Preset
+#[derive(Serialize, Deserialize, Clone, PartialEq)]
+pub enum Preset {
+    None,
+    Ultrafast,
+    Superfast,
+    Veryfast,
+    Faster,
+    Fast,
+    Medium,
+    Slow,
+    Slower,
+    Veryslow,
+}
+
+impl Default for Preset {
+    fn default() -> Self {
+        Preset::None
+    }
+}
+
+impl Preset {
+    fn as_str(&self) -> Option<&'static str> {
+        match self {
+            Preset::None => None,
+            Preset::Ultrafast => Some("ultrafast"),
+            Preset::Superfast => Some("superfast"),
+            Preset::Veryfast => Some("veryfast"),
+            Preset::Faster => Some("faster"),
+            Preset::Fast => Some("fast"),
+            Preset::Medium => Some("medium"),
+            Preset::Slow => Some("slow"),
+            Preset::Slower => Some("slower"),
+            Preset::Veryslow => Some("veryslow"),
+        }
+    }
+}
+
 // compression options
 #[derive(Serialize, Deserialize)]
 pub struct AppConfig {
@@ -70,6 +108,9 @@ pub struct AppConfig {
     pub dark_mode_enabled: bool,
 
     pub resolution: Option<Resolution>,
+
+    #[serde(default)]
+    pub preset: Preset,
 }
 
 fn default_target_size() -> u32 {
@@ -84,6 +125,7 @@ impl ::std::default::Default for AppConfig {
             encoder: Encoder::CpuX264,
             dark_mode_enabled: false,
             resolution: None,
+            preset: Preset::None,
         }
     }
 }
@@ -177,6 +219,7 @@ impl MyApp {
         let queue_item_clone = queue_item.clone();
         let target_size_mb = self.config.target_size_mb;
         let resolution = self.config.resolution.clone();
+        let config_preset = self.config.preset.clone();
 
         thread::spawn(move || {
             let Some((video_bitrate, audio_bitrate)) = calculate_bitrate(queue_item.to_str().unwrap(), target_size_mb) else {
@@ -213,6 +256,10 @@ impl MyApp {
             let filters_str = filters.join(",");
             if !filters.is_empty() {
                 args.splice(2..2, ["-filter:v", &filters_str]);
+            }
+
+            if let Some(preset_str) = config_preset.as_str() {
+                args.extend(["-preset", preset_str]);
             }
 
             // dump command string to the log for debugging
@@ -500,6 +547,30 @@ impl eframe::App for MyApp {
                                 self.config_dirty = true;
                             }
                         }
+                    });
+
+                    ui.horizontal(|ui| {
+                        ui.label("Preset:");
+
+                        egui::ComboBox::from_id_salt("preset_combo")
+                            .selected_text(match self.config.preset {
+                                Preset::None => "Unspecified",
+                                ref p => p.as_str().unwrap_or("Unknown"),
+                            })
+                            .show_ui(ui, |ui| {
+                                ui.selectable_value(&mut self.config.preset, Preset::None, "Unspecified");
+                                ui.selectable_value(&mut self.config.preset, Preset::Ultrafast, "ultrafast");
+                                ui.selectable_value(&mut self.config.preset, Preset::Superfast, "superfast");
+                                ui.selectable_value(&mut self.config.preset, Preset::Veryfast, "veryfast");
+                                ui.selectable_value(&mut self.config.preset, Preset::Faster, "faster");
+                                ui.selectable_value(&mut self.config.preset, Preset::Fast, "fast");
+                                ui.selectable_value(&mut self.config.preset, Preset::Medium, "medium");
+                                ui.selectable_value(&mut self.config.preset, Preset::Slow, "slow");
+                                ui.selectable_value(&mut self.config.preset, Preset::Slower, "slower");
+                                ui.selectable_value(&mut self.config.preset, Preset::Veryslow, "veryslow");
+                            });
+
+                        self.config_dirty = true;
                     });
 
                     ui.add_space(15.0);
