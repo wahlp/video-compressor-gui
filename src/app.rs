@@ -222,7 +222,12 @@ impl MyApp {
         let config_preset = self.config.preset.clone();
 
         thread::spawn(move || {
-            let Some((video_bitrate, audio_bitrate)) = calculate_bitrate(queue_item.to_str().unwrap(), target_size_mb) else {
+            let Some((duration, audio_bitrate)) = get_duration_and_audio_bitrate(queue_item.to_str().unwrap()) else {
+                log_tx.send("Failed to calculate bitrate.".to_string()).ok();
+                log_tx.send("[done]".to_string()).ok();
+                return;
+            };
+            let Some((video_bitrate, audio_bitrate)) = calculate_bitrate(target_size_mb, duration, audio_bitrate) else {
                 log_tx.send("Failed to calculate bitrate.".to_string()).ok();
                 log_tx.send("[done]".to_string()).ok();
                 return;
@@ -360,20 +365,18 @@ fn get_duration_and_audio_bitrate(path: &str) -> Option<(f64, u32)> {
     Some((duration, bitrate))
 }
 
-fn calculate_bitrate(video_path: &str, size_upper_bound_mb: u32) -> Option<(u32, u32)> {
-    let (duration, mut audio_bitrate) = get_duration_and_audio_bitrate(video_path)?;
-
+fn calculate_bitrate(size_upper_bound_mb: u32, duration: f64, mut audio_bitrate: u32) -> Option<(u32, u32)> {
     // calculate the allowed bits per second to reach target output file size
     let gib_to_gb_conversion = 1.073741824;
     let target_total_bitrate = (size_upper_bound_mb * 1000 * 1000 * 8) as f64 / (gib_to_gb_conversion * duration);
 
-    // allocate some bitrate for audio
+    // throttle audio bitrate if bandwidth is bad
     if 10.0 * audio_bitrate as f64 > target_total_bitrate {
         audio_bitrate = (target_total_bitrate / 10.0) as u32;
         audio_bitrate = audio_bitrate.clamp(64_000, 256_000)
     }
-    
-    // spend the remaining bitrate on video
+
+    // allocate some bitrate for audio, spend the remaining bitrate on video
     let video_bitrate = (target_total_bitrate as u32).saturating_sub(audio_bitrate);
 
     Some((video_bitrate, audio_bitrate))
