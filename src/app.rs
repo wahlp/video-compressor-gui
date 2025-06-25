@@ -453,16 +453,22 @@ impl eframe::App for MyApp {
                             ui.label(egui::RichText::new("Drop video files here to begin").heading().weak());
                         });
                     } else {
-                        if ui
-                            .add_sized(
+                        if self.ffmpeg_busy.load(Ordering::SeqCst) {
+                            ui.add_sized(
                                 egui::vec2(200.0, 40.0),
-                                egui::Button::new(egui::RichText::new("Start Compression").strong()).wrap(),
-                            )
-                            .clicked()
-                        {
-                            self.start_ffmpeg_thread();
+                                egui::Button::new(egui::RichText::new("Compressing..."))
+                            );
+                        } else {
+                            if ui
+                                .add_sized(
+                                    egui::vec2(200.0, 40.0),
+                                    egui::Button::new(egui::RichText::new("Start Compression").strong()).wrap(),
+                                )
+                                .clicked()
+                            {
+                                self.start_ffmpeg_thread();
+                            }
                         }
-
                         ui.separator();
 
                         ui.label("Queue:");
