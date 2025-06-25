@@ -208,7 +208,7 @@ impl MyApp {
                 filters.push(format!("fps={}", fps));
             }
             if let Some(res) = &resolution {
-                filters.push(format!("scale=-2:{}", res.to_height()));
+                filters.push(format!("scale=-1:{}", res.to_height()));
             }
             let filters_str = filters.join(",");
             if !filters.is_empty() {
