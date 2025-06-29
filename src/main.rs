@@ -1,5 +1,6 @@
 mod app;
 mod utils;
+mod types;
 use app::MyApp;
 
 fn main() -> eframe::Result<()> {
