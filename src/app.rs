@@ -452,9 +452,36 @@ impl eframe::App for MyApp {
                     });
 
                     ui.add_space(15.0);
-                    if ui.button("Reset to Defaults").clicked() {
-                        self.reset_config_to_default();
-                    }
+                    ui.horizontal(|ui| {
+                        if ui.button("Reset to Defaults").clicked() {
+                            self.reset_config_to_default();
+                        }
+                        
+                        if ui.button("Open Config Folder").clicked() {
+                            if let Ok(path) = confy::get_configuration_file_path(PROGRAM_CONFIG_NAME, None) {
+                                if let Some(folder) = path.parent() {
+                                    #[cfg(target_os = "windows")]
+                                    {
+                                        let _ = std::process::Command::new("explorer")
+                                            .arg(folder)
+                                            .spawn();
+                                    }
+                                    #[cfg(target_os = "macos")]
+                                    {
+                                        let _ = std::process::Command::new("open")
+                                            .arg(folder)
+                                            .spawn();
+                                    }
+                                    #[cfg(target_os = "linux")]
+                                    {
+                                        let _ = std::process::Command::new("xdg-open")
+                                            .arg(folder)
+                                            .spawn();
+                                    }
+                                }
+                            }
+                        }
+                    });
 
                     ui.add_space(15.0);
                     ui.label(egui::RichText::new("Program").strong());
