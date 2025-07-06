@@ -7,8 +7,16 @@ GUI to compress videos using FFMPEG so I don't have to pay for Discord Nitro
 
 ## Requirements
 - ffmpeg and ffprobe callable on $PATH
+  
+## Build
+- Run `cargo run --release` or `cargo build --release`
+- Executable will appear under `./target/release/`
 
-## Tips
+## Uninstall
+- Delete executable
+- Delete config folder (reachable via Options)
+
+## Usage Tips
 - Bitrate and duration are inversely proportional (size = bitrate * duration). Can't have a large amount of both.
 - Using lower resolution videos as the input will make the compression process faster
 - GPU encoder is much faster, but produces a larger output file size that may exceed calculations and overshoot the size limit
