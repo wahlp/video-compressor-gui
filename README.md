@@ -21,3 +21,6 @@ GUI to compress videos using FFMPEG so I don't have to pay for Discord Nitro
 - Using lower resolution videos as the input will make the compression process faster
 - GPU encoder is much faster, but produces a larger output file size that may exceed calculations and overshoot the size limit
 - Lowering the resolution during compression does not make the output look better
+
+# Development todos
+- Add option for two-pass encoding
